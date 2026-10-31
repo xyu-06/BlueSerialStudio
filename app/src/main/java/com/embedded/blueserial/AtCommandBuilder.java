@@ -49,11 +49,13 @@ public final class AtCommandBuilder {
     }
 
     private static String clean(String input, String error) {
-        if (input == null || input.trim().isEmpty())
+        if (input == null)
             throw new IllegalArgumentException(error);
-        String value = input.trim();
-        if (value.indexOf('\r') >= 0 || value.indexOf('\n') >= 0)
+        if (input.indexOf('\r') >= 0 || input.indexOf('\n') >= 0)
             throw new IllegalArgumentException("参数中不能包含换行符");
+        String value = input.trim();
+        if (value.isEmpty())
+            throw new IllegalArgumentException(error);
         return value;
     }
 }
