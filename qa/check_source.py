@@ -32,6 +32,6 @@ assert 'pages[4] = createAtToolPage()' in s and '"HC-05 AT"' in s
 assert 'createAtToolPage()' in s and 'addAtCommandRow(quick, "查询串口参数", "AT+UART?")' in s
 assert 'copyAtCommand(command)' in s and 'AtCommandBuilder.withCrlf(command)' in s
 assert '不会通过手机蓝牙 SPP 发送 AT 指令' in s
-assert '上电后红灯会先快闪约 3 秒' in s and '38400,1,0' in s
+assert '上电后红灯会先快闪约 3 秒' in s and '38400,0,0' in s
 assert 'AT+ORGL' in s and 'AT+RESET' in s and 'AT+UART?' in s
 print('35 UI/source static checks passed')
