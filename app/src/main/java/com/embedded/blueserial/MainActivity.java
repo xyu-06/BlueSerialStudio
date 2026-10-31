@@ -913,15 +913,18 @@ public final class MainActivity extends Activity {
         EditText nameInput = input("例如 BlueCar", false);
         nameInput.setText("BlueCar");
         nameCard.addView(nameInput, lparams(-1, 49));
+        TextView namePreview = text("预览：AT+NAME=BlueCar  + CRLF", 12, TEAL, false);
+        namePreview.setTypeface(Typeface.MONOSPACE);
+        nameCard.addView(namePreview);
         gap(nameCard, 8);
         LinearLayout nameActions = horizontal();
         Button queryName = btn("查询名称", false);
         Button setName = btn("复制修改指令", true);
         addWeighted(nameActions, queryName); addWeighted(nameActions, setName);
         nameCard.addView(nameActions);
-        queryName.setOnClickListener(v -> copyAtCommand("AT+NAME?"));
+        queryName.setOnClickListener(v -> copyAtCommand(namePreview, "AT+NAME?"));
         setName.setOnClickListener(v -> {
-            try { copyAtCommand(AtCommandBuilder.setName(nameInput.getText().toString())); }
+            try { copyAtCommand(namePreview, AtCommandBuilder.setName(nameInput.getText().toString())); }
             catch (IllegalArgumentException ex) { toast(ex.getMessage()); }
         });
 
@@ -963,19 +966,22 @@ public final class MainActivity extends Activity {
         fieldLp3.setMargins(dp(2), 0, dp(2), 0);
         uartFields.addView(parityCol, fieldLp3);
         uartCard.addView(uartFields);
+        TextView uartPreview = text("预览：AT+UART=9600,0,0  + CRLF", 12, TEAL, false);
+        uartPreview.setTypeface(Typeface.MONOSPACE);
+        uartCard.addView(uartPreview);
         gap(uartCard, 8);
         LinearLayout uartActions = horizontal();
         Button queryUart = btn("查询参数", false);
         Button setUart = btn("复制修改指令", true);
         addWeighted(uartActions, queryUart); addWeighted(uartActions, setUart);
         uartCard.addView(uartActions);
-        queryUart.setOnClickListener(v -> copyAtCommand("AT+UART?"));
+        queryUart.setOnClickListener(v -> copyAtCommand(uartPreview, "AT+UART?"));
         setUart.setOnClickListener(v -> {
             try {
                 int baud = Integer.parseInt((String) baudSpinner.getSelectedItem());
                 int stop = stopSpinner.getSelectedItemPosition();
                 int parity = paritySpinner.getSelectedItemPosition();
-                copyAtCommand(AtCommandBuilder.setUart(baud, stop, parity));
+                copyAtCommand(uartPreview, AtCommandBuilder.setUart(baud, stop, parity));
             } catch (IllegalArgumentException ex) { toast(ex.getMessage()); }
         });
 
@@ -983,15 +989,18 @@ public final class MainActivity extends Activity {
         EditText pinInput = input("例如 1234", false);
         pinInput.setText("1234");
         pinCard.addView(pinInput, lparams(-1, 49));
+        TextView pinPreview = text("预览：AT+PSWD=1234  + CRLF", 12, TEAL, false);
+        pinPreview.setTypeface(Typeface.MONOSPACE);
+        pinCard.addView(pinPreview);
         gap(pinCard, 8);
         LinearLayout pinActions = horizontal();
         Button queryPin = btn("查询配对码", false);
         Button setPin = btn("复制修改指令", true);
         addWeighted(pinActions, queryPin); addWeighted(pinActions, setPin);
         pinCard.addView(pinActions);
-        queryPin.setOnClickListener(v -> copyAtCommand("AT+PSWD?"));
+        queryPin.setOnClickListener(v -> copyAtCommand(pinPreview, "AT+PSWD?"));
         setPin.setOnClickListener(v -> {
-            try { copyAtCommand(AtCommandBuilder.setPin(pinInput.getText().toString())); }
+            try { copyAtCommand(pinPreview, AtCommandBuilder.setPin(pinInput.getText().toString())); }
             catch (IllegalArgumentException ex) { toast(ex.getMessage()); }
         });
 
@@ -1002,14 +1011,18 @@ public final class MainActivity extends Activity {
         roleAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         roleSpinner.setAdapter(roleAdapter);
         roleCard.addView(roleSpinner, lparams(-1, 49));
+        TextView rolePreview = text("预览：AT+ROLE=0  + CRLF", 12, TEAL, false);
+        rolePreview.setTypeface(Typeface.MONOSPACE);
+        roleCard.addView(rolePreview);
         gap(roleCard, 8);
         LinearLayout roleActions = horizontal();
         Button queryRole = btn("查询角色", false);
         Button setRole = btn("复制修改指令", true);
         addWeighted(roleActions, queryRole); addWeighted(roleActions, setRole);
         roleCard.addView(roleActions);
-        queryRole.setOnClickListener(v -> copyAtCommand("AT+ROLE?"));
-        setRole.setOnClickListener(v -> copyAtCommand(AtCommandBuilder.setRole(roleSpinner.getSelectedItemPosition())));
+        queryRole.setOnClickListener(v -> copyAtCommand(rolePreview, "AT+ROLE?"));
+        setRole.setOnClickListener(v -> copyAtCommand(rolePreview,
+            AtCommandBuilder.setRole(roleSpinner.getSelectedItemPosition())));
 
         LinearLayout advanced = card(body, "其他支持的指令");
         notice(advanced, "以下命令来自你提供的兼容版说明书；部分命令会改变连接或配对状态。");
@@ -1071,6 +1084,11 @@ public final class MainActivity extends Activity {
             .setNegativeButton("取消", null)
             .setPositiveButton("确认复制", (dialog, which) -> copyAtCommand(command))
             .show());
+    }
+
+    private void copyAtCommand(TextView preview, String command) {
+        preview.setText("预览：" + command + "  + CRLF");
+        copyAtCommand(command);
     }
 
     private void copyAtCommand(String command) {
