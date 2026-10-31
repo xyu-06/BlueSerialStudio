@@ -73,6 +73,6 @@ public final class ProtocolSelfTest {
         expectInvalidAt(() -> AtCommandBuilder.setUart(9600, 2, 0));
         expectInvalidAt(() -> AtCommandBuilder.setUart(9600, 0, 3));
         expectInvalidAt(() -> AtCommandBuilder.withCrlf("AT\r"));
-        System.out.println("49 protocol and AT-command checks passed");
+        System.out.println("47 protocol and AT-command checks passed");
     }
 }
