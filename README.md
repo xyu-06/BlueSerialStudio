@@ -16,7 +16,7 @@
 
 ## 下载 APK
 
-**[下载最新 v1.6 Debug APK](https://raw.githubusercontent.com/xyu-06/BlueSerialStudio/main/downloads/BlueSerialStudio-v1.6-debug.apk)**
+**[下载最新 v1.6.1 Debug APK](https://raw.githubusercontent.com/xyu-06/BlueSerialStudio/main/downloads/BlueSerialStudio-v1.6.1-debug.apk)**
 
 自动构建记录：[GitHub Actions](https://github.com/xyu-06/BlueSerialStudio/actions/workflows/build-apk.yml)。每次 `main` 分支更新时会编译并上传 APK 工件，还会把 APK 发布到 `downloads/` 路径，便于手机直接下载。
 
@@ -72,3 +72,7 @@ J,0,0      # 停车
 主界面新增 HC-05 AT 工具页，提供名称、波特率、配对码、角色的参数化命令生成，以及常用查询和管理指令复制。复制的指令自动附加 CRLF。波特率选项按所提供的兼容版说明书逐字录入，包含原文中的 `5760`，没有擅自改成 `57600`。
 
 **重要：** 此工具只生成并复制指令，不会通过手机蓝牙 SPP 通道配置 HC-05。按说明书需通过 USB-TTL 连接模块 UART，并按上电后 3 秒内按键的方式进入 AT 模式。请阅读工具页内的全部注意事项，尤其是 RXD 逻辑电平、波特率切换，以及 `AT+ORGL` 后 UART 为 `38400,0,0` 且会退出 AT 模式的说明。
+
+## v1.6.1：修复页面入口反转
+
+第 4 个导航「HC-05 AT」现在打开 AT 指令工具箱，第 5 个导航「设置」打开 UUID、结束符等原有设置。新增全五个页面绑定的自动断言，其余功能和用户设置保持不变。
