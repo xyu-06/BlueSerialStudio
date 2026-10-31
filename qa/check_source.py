@@ -29,7 +29,7 @@ assert 'sendMacro(item)' in s and 'SerialProtocol.parseHex(macro.command)' in s
 assert 'HEX 原始字节（不添加结束符）' in s
 assert 'pages = new View[5]' in s and 'navButtons = new Button[5]' in s
 assert 'pages[4] = createAtToolPage()' in s and '"HC-05 AT"' in s
-assert 'createAtToolPage()' in s and 'addAtCommandRow(quick, "查询波特率"' not in s
+assert 'createAtToolPage()' in s and 'addAtCommandRow(quick, "查询串口参数", "AT+UART?")' in s
 assert 'copyAtCommand(command)' in s and 'AtCommandBuilder.withCrlf(command)' in s
 assert '不会通过手机蓝牙 SPP 发送 AT 指令' in s
 assert '上电后红灯会先快闪约 3 秒' in s and '38400,1,0' in s
