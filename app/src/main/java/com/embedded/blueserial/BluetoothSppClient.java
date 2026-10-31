@@ -9,18 +9,10 @@ import android.os.Looper;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.util.Arrays;
 import java.util.UUID;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
 
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.atomic.AtomicBoolean;
-
-/** Thread-safe Classic Bluetooth SPP client. Never blocks Android's main thread. */
+/** Session-scoped Classic Bluetooth SPP client; connect/read/write run off the UI thread. */
 public final class BluetoothSppClient {
     public interface Listener {
         void onStatus(String label, boolean connected);
@@ -28,166 +20,180 @@ public final class BluetoothSppClient {
         void onSent(int count);
         void onError(String message);
     }
-
     private static final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
+    private static final long CONNECT_TIMEOUT_MS = 15000;
     private final Handler ui = new Handler(Looper.getMainLooper());
-    private final ThreadPoolExecutor writeQueue = new ThreadPoolExecutor(
-        1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
-    private final AtomicInteger generation = new AtomicInteger();
-    private final AtomicReference<byte[]> latestDrive = new AtomicReference<>();
-    private final AtomicBoolean drivePumpQueued = new AtomicBoolean(false);
     private final Object socketLock = new Object();
+    private final OutboundQueue outgoing = new OutboundQueue();
     private final Listener listener;
+    private volatile int generation;
     private volatile BluetoothSocket socket;
-    private volatile boolean connected;
+    private volatile boolean connected, connecting, closed;
+    private final Thread writer;
 
-    public BluetoothSppClient(Listener listener) { this.listener = listener; }
+    public BluetoothSppClient(Listener listener) {
+        this.listener = listener;
+        writer = new Thread(() -> {
+            try {
+                OutboundQueue.Packet packet;
+                while ((packet = outgoing.take()) != null) writePacket(packet);
+            } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+        }, "SPP-writer");
+        writer.start();
+    }
     public boolean isConnected() { return connected; }
+    public boolean isConnecting() { return connecting; }
 
     @SuppressLint("MissingPermission")
     public void connect(BluetoothAdapter adapter, BluetoothDevice device, String uuidText) {
         final UUID uuid;
-        try {
-            uuid = uuidText.trim().isEmpty() ? SPP_UUID : UUID.fromString(uuidText.trim());
-        } catch (IllegalArgumentException exception) {
-            emitError("UUID 无效，请检查设置中的服务 UUID");
-            return;
+        try { uuid = uuidText.trim().isEmpty() ? SPP_UUID : UUID.fromString(uuidText.trim()); }
+        catch (IllegalArgumentException exception) {
+            error("UUID 无效，请检查设置中的服务 UUID", generation); return;
         }
-        disconnect(false);
-        final int id = generation.get();
-        status("连接中…", false);
+        final int id;
+        synchronized (socketLock) {
+            if (closed) return;
+            disconnectLocked();
+            id = generation;
+            connecting = true;
+        }
+        status("连接中…", false, id);
+        Runnable timeout = () -> {
+            synchronized (socketLock) {
+                if (generation != id || !connecting) return;
+                disconnectLocked();
+                error("连接超时，请检查模块电源、距离和配对状态", generation);
+                status("未连接", false, generation);
+            }
+        };
+        ui.postDelayed(timeout, CONNECT_TIMEOUT_MS);
         new Thread(() -> {
             BluetoothSocket candidate = null;
             try {
-                try {
-                    adapter.cancelDiscovery();
-                } catch (SecurityException ignored) { }
-                // Try authenticated RFCOMM first.
+                try { adapter.cancelDiscovery(); } catch (SecurityException ignored) { }
                 candidate = device.createRfcommSocketToServiceRecord(uuid);
                 if (!track(candidate, id)) return;
-                try {
-                    candidate.connect();
-                } catch (IOException firstFailure) {
+                try { candidate.connect(); }
+                catch (IOException firstFailure) {
                     safeClose(candidate);
-                    if (id != generation.get()) return;
-                    // Some older serial modules do not support authenticated pairing.
+                    if (id != generation) return;
                     candidate = device.createInsecureRfcommSocketToServiceRecord(uuid);
                     if (!track(candidate, id)) return;
                     candidate.connect();
                 }
-                if (id != generation.get()) { safeClose(candidate); return; }
-                connected = true;
-                String name = device.getName();
-                status("已连接 · " + (name == null ? device.getAddress() : name), true);
                 InputStream stream = candidate.getInputStream();
+                String name = device.getName();
+                synchronized (socketLock) {
+                    if (id != generation || closed) return;
+                    connected = true;
+                    connecting = false;
+                    status("已连接 · " + (name == null ? device.getAddress() : name), true, id);
+                }
+                ui.removeCallbacks(timeout);
                 byte[] buffer = new byte[2048];
                 int count;
-                while (generation.get() == id && (count = stream.read(buffer)) >= 0) {
+                while (generation == id && (count = stream.read(buffer)) >= 0) {
                     if (count > 0) {
                         byte[] bytes = Arrays.copyOf(buffer, count);
-                        ui.post(() -> { if (generation.get() == id) listener.onReceived(bytes); });
+                        ui.post(() -> { if (!closed && generation == id) listener.onReceived(bytes); });
                     }
                 }
             } catch (IOException | SecurityException exception) {
-                if (generation.get() == id) emitError("连接/通信失败：" + exception.getMessage());
+                error("连接/通信失败：" + exception.getMessage(), id);
             } finally {
+                ui.removeCallbacks(timeout);
                 safeClose(candidate);
                 synchronized (socketLock) {
-                    if (socket == candidate && generation.get() == id) socket = null;
-                }
-                if (generation.get() == id) {
-                    connected = false;
-                    status("未连接", false);
+                    // An old reader must never reset a newer connection or clear its queue.
+                    if (generation == id) {
+                        socket = null;
+                        connected = false;
+                        connecting = false;
+                        outgoing.clear();
+                        status("未连接", false, id);
+                    }
                 }
             }
         }, "SPP-reader-" + id).start();
     }
-
     private boolean track(BluetoothSocket candidate, int id) {
         synchronized (socketLock) {
-            if (generation.get() != id) { safeClose(candidate); return false; }
+            if (generation != id || closed) { safeClose(candidate); return false; }
             socket = candidate;
             return true;
         }
     }
-
-    /** Stop/neutral packets supersede any unsent motion/control backlog. */
-    public void sendUrgent(byte[] bytes) {
-        if (!connected || bytes.length == 0) return;
-        latestDrive.set(null);
-        writeQueue.getQueue().clear();
-        send(bytes);
+    /** Clears pending commands; a write already inside the OS cannot be recalled. */
+    public boolean sendUrgent(byte[] bytes) { return enqueue(bytes, false, true); }
+    public boolean sendDrive(byte[] bytes) { return enqueue(bytes, true, false); }
+    public boolean send(byte[] bytes) { return enqueue(bytes, false, false); }
+    public boolean sendRepeated(byte[] bytes) {
+        synchronized (socketLock) {
+            if (closed || !connected) return false;
+            boolean accepted = outgoing.offerRepeated(bytes, generation);
+            if (!accepted) error("循环发送已停止：发送队列已满", generation);
+            return accepted;
+        }
     }
-
-    /** Coalesce continuously changing joystick/button states: never accumulate stale motion packets. */
-    public void sendDrive(byte[] bytes) {
-        if (!connected || bytes.length == 0) return;
-        latestDrive.set(Arrays.copyOf(bytes, bytes.length));
-        scheduleDrivePump();
+    public void cancelRepeated() { outgoing.clearRepeated(); }
+    private boolean enqueue(byte[] bytes, boolean drive, boolean urgent) {
+        synchronized (socketLock) {
+            if (closed || !connected || bytes.length == 0) return false;
+            boolean accepted = outgoing.offer(bytes, generation, drive, urgent);
+            if (!accepted && !drive) error("发送队列已满，请降低发送频率", generation);
+            return accepted;
+        }
     }
-
-    private void scheduleDrivePump() {
-        if (!drivePumpQueued.compareAndSet(false, true)) return;
-        final int id = generation.get();
-        writeQueue.execute(() -> {
-            try {
-                byte[] packet;
-                while (connected && generation.get() == id
-                        && (packet = latestDrive.getAndSet(null)) != null) {
-                    writePacket(packet, id);
-                }
-            } finally {
-                drivePumpQueued.set(false);
-                if (connected && latestDrive.get() != null) scheduleDrivePump();
-            }
-        });
-    }
-
-    public void send(byte[] bytes) {
-        if (bytes.length == 0) return;
-        if (!connected) { emitError("请先连接蓝牙设备"); return; }
-        final int id = generation.get();
-        final byte[] packet = Arrays.copyOf(bytes, bytes.length);
-        writeQueue.execute(() -> writePacket(packet, id));
-    }
-
-    private void writePacket(byte[] packet, int id) {
-        if (!connected || generation.get() != id) return;
-        BluetoothSocket connection = socket;
+    private void writePacket(OutboundQueue.Packet packet) {
+        BluetoothSocket connection;
+        synchronized (socketLock) {
+            if (!connected || generation != packet.generation) return;
+            connection = socket;
+        }
         if (connection == null) return;
         try {
-            OutputStream output = connection.getOutputStream();
-            output.write(packet);
-            ui.post(() -> { if (generation.get() == id) listener.onSent(packet.length); });
-        } catch (IOException exception) {
-            if (generation.get() == id) {
-                emitError("发送失败：" + exception.getMessage());
-                disconnect(true);
+            connection.getOutputStream().write(packet.bytes);
+            ui.post(() -> {
+                if (!closed && generation == packet.generation) listener.onSent(packet.bytes.length);
+            });
+        } catch (IOException | SecurityException exception) {
+            synchronized (socketLock) {
+                if (generation == packet.generation) {
+                    disconnectLocked();
+                    error("发送失败：" + exception.getMessage(), generation);
+                    status("未连接", false, generation);
+                }
             }
         }
     }
-
-    public void disconnect() { disconnect(true); }
-
-    private void disconnect(boolean notify) {
-        generation.incrementAndGet();
-        latestDrive.set(null);
-        writeQueue.getQueue().clear();
-        connected = false;
+    public void disconnect() {
         synchronized (socketLock) {
-            safeClose(socket);
-            socket = null;
+            disconnectLocked();
+            status("未连接", false, generation);
         }
-        if (notify) status("未连接", false);
     }
-
+    private void disconnectLocked() {
+        generation++;
+        connected = false;
+        connecting = false;
+        outgoing.clear();
+        safeClose(socket);
+        socket = null;
+    }
     private static void safeClose(BluetoothSocket connection) {
         if (connection != null) try { connection.close(); } catch (IOException ignored) { }
     }
-
-    private void status(String s, boolean active) {
-        ui.post(() -> listener.onStatus(s, active));
+    private void status(String value, boolean active, int id) {
+        ui.post(() -> { if (!closed && generation == id) listener.onStatus(value, active); });
     }
-    private void emitError(String s) { ui.post(() -> listener.onError(s)); }
-    public void shutdown() { disconnect(); writeQueue.shutdownNow(); }
+    private void error(String value, int id) {
+        ui.post(() -> { if (!closed && generation == id) listener.onError(value); });
+    }
+    public void shutdown() {
+        synchronized (socketLock) { closed = true; disconnectLocked(); }
+        outgoing.close();
+        writer.interrupt();
+        ui.removeCallbacksAndMessages(null);
+    }
 }
