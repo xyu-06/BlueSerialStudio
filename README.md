@@ -16,7 +16,7 @@
 
 ## 下载 APK
 
-**[下载最新 v1.4 Debug APK](https://raw.githubusercontent.com/xyu-06/BlueSerialStudio/main/downloads/BlueSerialStudio-v1.5-debug.apk)**
+**[下载最新 v1.6 Debug APK](https://raw.githubusercontent.com/xyu-06/BlueSerialStudio/main/downloads/BlueSerialStudio-v1.6-debug.apk)**
 
 自动构建记录：[GitHub Actions](https://github.com/xyu-06/BlueSerialStudio/actions/workflows/build-apk.yml)。每次 `main` 分支更新时会编译并上传 APK 工件，还会把 APK 发布到 `downloads/` 路径，便于手机直接下载。
 
@@ -66,3 +66,9 @@ J,0,0      # 停车
 在遥控页面长按快捷按键，或新增按键时，可为**每个按键单独选择文本/HEX**。文本模式保持原有 UTF-8 文本发送和结束符设置；HEX 模式将输入解析为原始字节并直接发送，不添加 LF/CR/CRLF 结束符，也不会把十六进制字符当作普通文本发送。
 
 支持格式示例：`AA 55 01`、`AA5501`、`0xAA,0x55,0x01`。保存时会验证 HEX 格式，奇数位、非法字符和不完整字节会被拒绝。旧版本快捷键配置没有 `hex` 字段，升级后自动按文本模式读取，不会改变原有按键行为。
+
+## v1.6.0：HC-05 AT 指令工具箱
+
+主界面新增 HC-05 AT 工具页，提供名称、波特率、配对码、角色的参数化命令生成，以及常用查询和管理指令复制。复制的指令自动附加 CRLF。波特率选项按所提供的兼容版说明书逐字录入，包含原文中的 `5760`，没有擅自改成 `57600`。
+
+**重要：** 此工具只生成并复制指令，不会通过手机蓝牙 SPP 通道配置 HC-05。按说明书需通过 USB-TTL 连接模块 UART，并按上电后 3 秒内按键的方式进入 AT 模式。请阅读工具页内的全部注意事项，尤其是 RXD 逻辑电平、波特率切换，以及 `AT+ORGL` 后 UART 为 `38400,1,0` 且会退出 AT 模式的说明。

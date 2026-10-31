@@ -6,6 +6,12 @@ public final class ProtocolSelfTest {
     private static void check(boolean value, String title) {
         if (!value) throw new AssertionError(title);
     }
+    private interface InvalidAction { void run(); }
+    private static void expectInvalidAt(InvalidAction action) {
+        try { action.run(); }
+        catch (IllegalArgumentException expected) { return; }
+        throw new AssertionError("Invalid AT command parameter was accepted");
+    }
     private static void expectInvalidHex(String input) {
         try { SerialProtocol.parseHex(input); }
         catch (IllegalArgumentException expected) { return; }
@@ -48,6 +54,23 @@ public final class ProtocolSelfTest {
         expectInvalidHex("AAG1");
         expectInvalidHex("AA 5");
         expectInvalidHex("0xGG");
-        System.out.println("30 protocol checks passed");
+        check(AtCommandBuilder.setName("BlueCar").equals("AT+NAME=BlueCar"), "HC-05 set name");
+        check(AtCommandBuilder.setPin("1234").equals("AT+PSWD=1234"), "HC-05 set PIN");
+        check(AtCommandBuilder.setRole(0).equals("AT+ROLE=0"), "HC-05 slave role");
+        check(AtCommandBuilder.setRole(1).equals("AT+ROLE=1"), "HC-05 master role");
+        check(AtCommandBuilder.setRole(2).equals("AT+ROLE=2"), "HC-05 loop role");
+        check(AtCommandBuilder.setUart(115200, 1, 2).equals("AT+UART=115200,1,2"), "HC-05 UART command");
+        check(AtCommandBuilder.isSupportedBaudRate(5760), "guide baud list literal 5760");
+        check(!AtCommandBuilder.isSupportedBaudRate(57600), "do not silently rewrite 5760");
+        check(AtCommandBuilder.withCrlf("AT+NAME?").equals("AT+NAME?\\r\\n"), "HC-05 CRLF suffix");
+        expectInvalidAt(() -> AtCommandBuilder.setName(" "));
+        expectInvalidAt(() -> AtCommandBuilder.setName("Bad\\nName"));
+        expectInvalidAt(() -> AtCommandBuilder.setPin("12,34"));
+        expectInvalidAt(() -> AtCommandBuilder.setRole(3));
+        expectInvalidAt(() -> AtCommandBuilder.setUart(57600, 0, 0));
+        expectInvalidAt(() -> AtCommandBuilder.setUart(9600, 2, 0));
+        expectInvalidAt(() -> AtCommandBuilder.setUart(9600, 0, 3));
+        expectInvalidAt(() -> AtCommandBuilder.withCrlf("AT\\r"));
+        System.out.println("46 protocol and AT-command checks passed");
     }
 }

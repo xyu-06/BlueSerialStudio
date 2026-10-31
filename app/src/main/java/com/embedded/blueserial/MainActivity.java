@@ -8,6 +8,8 @@ import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
 import android.content.BroadcastReceiver;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -77,8 +79,8 @@ public final class MainActivity extends Activity {
 
     private LinearLayout root, header;
     private FrameLayout pageHost;
-    private View[] pages = new View[4];
-    private Button[] navButtons = new Button[4];
+    private View[] pages = new View[5];
+    private Button[] navButtons = new Button[5];
     private TextView connectionState, counterLabel, connectButtonText, outputLog, joyReadout, chartCounter, sendSuffixLabel;
     private ScrollView logScroller;
     private EditText sendInput, uuidEdit;
@@ -324,16 +326,17 @@ public final class MainActivity extends Activity {
         pages[1] = createControlPage();
         pages[2] = createPlotPage();
         pages[3] = createSettingsPage();
+        pages[4] = createAtToolPage();
 
         LinearLayout nav = horizontal();
         nav.setPadding(dp(10), dp(7), dp(10), dp(7));
         nav.setBackgroundColor(Color.WHITE);
-        String[] titles = {"⌨ 串口", "✥ 遥控", "⌁ 曲线", "⚙ 设置"};
-        for (int i = 0; i < 4; i++) {
+        String[] titles = {"⌨ 串口", "✥ 遥控", "⌁ 曲线", "HC-05 AT", "⚙ 设置"};
+        for (int i = 0; i < 5; i++) {
             final int tab = i;
             Button button = btn(titles[i], false);
             navButtons[i] = button;
-            button.setTextSize(12);
+            button.setTextSize(11);
             LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(46), 1);
             p.setMargins(dp(2), 0, dp(2), 0);
             nav.addView(button, p);
@@ -872,6 +875,212 @@ public final class MainActivity extends Activity {
         gap(help, 9);
         notice(help, "绘图会自动缩放 Y 轴，只保留最近 180 帧；建议 STM32 每 20～100 ms 发送一帧。");
         return page;
+    }
+
+
+    private View createAtToolPage() {
+        ScrollView page = new ScrollView(this);
+        LinearLayout body = pageBody(page);
+
+        LinearLayout cautions = card(body, "⚠ 使用前必读 · AT 配置注意事项");
+        notice(cautions, "1. 本工具只负责生成和复制指令，不会通过手机蓝牙 SPP 发送 AT 指令。按说明书，AT 配置应通过 USB-TTL 转串口连接模块 UART。普通蓝牙透传连接不等于 AT 配置模式。");
+        gap(cautions, 8);
+        notice(cautions, "2. 进入 AT 模式：模块上电后红灯会先快闪约 3 秒；在这 3 秒内长按 KEY/板载按键。成功进入 AT 模式后红灯慢闪。错过时间需重新断电上电再操作。");
+        gap(cautions, 8);
+        notice(cautions, "3. USB-TTL 接线按说明书：GND 共地、TXD 与 RXD 交叉连接。说明书图示板标注供电 3.6–6V、串口逻辑电平 3.3V；请按你手中模块的实际板卡标识供电，不能把 5V 供电误认为 RXD 可直接承受 5V。");
+        gap(cautions, 8);
+        notice(cautions, "4. 串口助手基础格式按说明书设置为 8 数据位、1 停止位、无校验、无流控。指令末尾使用 CRLF（\\r\\n）；本工具复制时会自动附加 CRLF。");
+        gap(cautions, 8);
+        notice(cautions, "5. 修改 AT+UART 后，USB-TTL 串口助手也要切换到新波特率，后续才能继续通信。说明书的波特率列表原文包含 5760，请先核对具体固件，不要自行当成 57600。");
+        gap(cautions, 8);
+        notice(cautions, "6. AT+RESET 会让模块退出 AT 模式；AT+ORGL 恢复默认参数后也会退出 AT 模式。说明书特别注明 ORGL 后串口参数为 38400,1,0；出厂统一设置的 9600 与执行 ORGL 后的值不同。");
+        gap(cautions, 8);
+        notice(cautions, "7. 本工具按你提供的兼容版说明书整理，只列出该说明书明确支持的命令。不同批次/固件可能有差异，先用 AT 测试并核对返回 OK；不支持的指令不要反复尝试。");
+
+        LinearLayout quick = card(body, "常用查询指令");
+        notice(quick, "点击右侧复制，再粘贴到 USB-TTL 串口助手发送。复制内容末尾自动带 CRLF。");
+        gap(quick, 7);
+        addAtCommandRow(quick, "通信测试", "AT");
+        addAtCommandRow(quick, "查询固件版本", "AT+VERSION?");
+        addAtCommandRow(quick, "查询蓝牙名称", "AT+NAME?");
+        addAtCommandRow(quick, "查询串口参数", "AT+UART?");
+        addAtCommandRow(quick, "查询配对码", "AT+PSWD?");
+        addAtCommandRow(quick, "查询模块角色", "AT+ROLE?");
+        addAtCommandRow(quick, "查询蓝牙地址", "AT+ADDR?");
+        addAtCommandRow(quick, "查询模块状态", "AT+STATE?");
+
+        LinearLayout nameCard = card(body, "修改蓝牙名称");
+        EditText nameInput = input("例如 BlueCar", false);
+        nameInput.setText("BlueCar");
+        nameCard.addView(nameInput, lparams(-1, 49));
+        gap(nameCard, 8);
+        LinearLayout nameActions = horizontal();
+        Button queryName = btn("查询名称", false);
+        Button setName = btn("复制修改指令", true);
+        addWeighted(nameActions, queryName); addWeighted(nameActions, setName);
+        nameCard.addView(nameActions);
+        queryName.setOnClickListener(v -> copyAtCommand("AT+NAME?"));
+        setName.setOnClickListener(v -> {
+            try { copyAtCommand(AtCommandBuilder.setName(nameInput.getText().toString())); }
+            catch (IllegalArgumentException ex) { toast(ex.getMessage()); }
+        });
+
+        LinearLayout uartCard = card(body, "修改串口波特率");
+        notice(uartCard, "命令格式：AT+UART=波特率,停止位,校验位。停止位 0=1 位、1=2 位；校验位 0=无、1=奇校验、2=偶校验。");
+        gap(uartCard, 8);
+        LinearLayout uartFields = horizontal();
+        LinearLayout baudCol = vertical();
+        baudCol.addView(text("波特率", 12, MUTED, true));
+        Spinner baudSpinner = new Spinner(this);
+        String[] baudValues = {"2400", "4800", "9600", "19200", "38400", "5760", "115200", "230400", "460800", "921600", "1382400"};
+        ArrayAdapter<String> baudAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, baudValues);
+        baudAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        baudSpinner.setAdapter(baudAdapter); baudSpinner.setSelection(2);
+        baudCol.addView(baudSpinner, lparams(-1, 47));
+        LinearLayout stopCol = vertical();
+        stopCol.addView(text("停止位", 12, MUTED, true));
+        Spinner stopSpinner = new Spinner(this);
+        String[] stopValues = {"1 位", "2 位"};
+        ArrayAdapter<String> stopAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, stopValues);
+        stopAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        stopSpinner.setAdapter(stopAdapter);
+        stopCol.addView(stopSpinner, lparams(-1, 47));
+        LinearLayout parityCol = vertical();
+        parityCol.addView(text("校验位", 12, MUTED, true));
+        Spinner paritySpinner = new Spinner(this);
+        String[] parityValues = {"无", "奇校验", "偶校验"};
+        ArrayAdapter<String> parityAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, parityValues);
+        parityAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        paritySpinner.setAdapter(parityAdapter);
+        parityCol.addView(paritySpinner, lparams(-1, 47));
+        LinearLayout.LayoutParams fieldLp = new LinearLayout.LayoutParams(0, -2, 1);
+        fieldLp.setMargins(dp(2), 0, dp(2), 0);
+        uartFields.addView(baudCol, fieldLp);
+        LinearLayout.LayoutParams fieldLp2 = new LinearLayout.LayoutParams(0, -2, 1);
+        fieldLp2.setMargins(dp(2), 0, dp(2), 0);
+        uartFields.addView(stopCol, fieldLp2);
+        LinearLayout.LayoutParams fieldLp3 = new LinearLayout.LayoutParams(0, -2, 1);
+        fieldLp3.setMargins(dp(2), 0, dp(2), 0);
+        uartFields.addView(parityCol, fieldLp3);
+        uartCard.addView(uartFields);
+        gap(uartCard, 8);
+        LinearLayout uartActions = horizontal();
+        Button queryUart = btn("查询参数", false);
+        Button setUart = btn("复制修改指令", true);
+        addWeighted(uartActions, queryUart); addWeighted(uartActions, setUart);
+        uartCard.addView(uartActions);
+        queryUart.setOnClickListener(v -> copyAtCommand("AT+UART?"));
+        setUart.setOnClickListener(v -> {
+            try {
+                int baud = Integer.parseInt((String) baudSpinner.getSelectedItem());
+                int stop = stopSpinner.getSelectedItemPosition();
+                int parity = paritySpinner.getSelectedItemPosition();
+                copyAtCommand(AtCommandBuilder.setUart(baud, stop, parity));
+            } catch (IllegalArgumentException ex) { toast(ex.getMessage()); }
+        });
+
+        LinearLayout pinCard = card(body, "修改蓝牙配对码");
+        EditText pinInput = input("例如 1234", false);
+        pinInput.setText("1234");
+        pinCard.addView(pinInput, lparams(-1, 49));
+        gap(pinCard, 8);
+        LinearLayout pinActions = horizontal();
+        Button queryPin = btn("查询配对码", false);
+        Button setPin = btn("复制修改指令", true);
+        addWeighted(pinActions, queryPin); addWeighted(pinActions, setPin);
+        pinCard.addView(pinActions);
+        queryPin.setOnClickListener(v -> copyAtCommand("AT+PSWD?"));
+        setPin.setOnClickListener(v -> {
+            try { copyAtCommand(AtCommandBuilder.setPin(pinInput.getText().toString())); }
+            catch (IllegalArgumentException ex) { toast(ex.getMessage()); }
+        });
+
+        LinearLayout roleCard = card(body, "设置模块角色");
+        Spinner roleSpinner = new Spinner(this);
+        String[] roleValues = {"0 · 从角色 Slave（默认）", "1 · 主角色 Master", "2 · 回环角色 Slave-Loop"};
+        ArrayAdapter<String> roleAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, roleValues);
+        roleAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        roleSpinner.setAdapter(roleAdapter);
+        roleCard.addView(roleSpinner, lparams(-1, 49));
+        gap(roleCard, 8);
+        LinearLayout roleActions = horizontal();
+        Button queryRole = btn("查询角色", false);
+        Button setRole = btn("复制修改指令", true);
+        addWeighted(roleActions, queryRole); addWeighted(roleActions, setRole);
+        roleCard.addView(roleActions);
+        queryRole.setOnClickListener(v -> copyAtCommand("AT+ROLE?"));
+        setRole.setOnClickListener(v -> copyAtCommand(AtCommandBuilder.setRole(roleSpinner.getSelectedItemPosition())));
+
+        LinearLayout advanced = card(body, "其他支持的指令");
+        notice(advanced, "以下命令来自你提供的兼容版说明书；部分命令会改变连接或配对状态。");
+        gap(advanced, 7);
+        addAtCommandRow(advanced, "查询设备类", "AT+CLASS?");
+        addAtCommandRow(advanced, "查询访问码", "AT+IAC?");
+        addAtCommandRow(advanced, "查询查询模式", "AT+INQM?");
+        addAtCommandRow(advanced, "查询连接模式", "AT+CMODE?");
+        addAtCommandRow(advanced, "查询绑定地址", "AT+BIND?");
+        addAtCommandRow(advanced, "查询指示灯极性", "AT+POLAR?");
+        addAtCommandRow(advanced, "查询最近认证设备", "AT+MRAD?");
+        addAtCommandRow(advanced, "搜索附近蓝牙设备", "AT+INQ");
+        addAtCommandRow(advanced, "取消设备搜索", "AT+INQC");
+        addAtCommandRow(advanced, "断开蓝牙连接", "AT+DISC");
+
+        LinearLayout actions = card(body, "需要谨慎使用的操作");
+        addAtDangerRow(actions, "恢复默认参数", "AT+ORGL",
+            "恢复默认设置会改变模块参数并退出 AT 模式。说明书列出的 ORGL 后 UART 为 38400,1,0；执行后请按新参数重新配置串口。");
+        gap(actions, 7);
+        addAtDangerRow(actions, "重启模块", "AT+RESET",
+            "模块复位后会退出 AT 模式，需要重新进入 AT 模式才能继续配置。");
+        gap(actions, 7);
+        addAtDangerRow(actions, "删除全部认证设备", "AT+RMAAD",
+            "此命令会清除模块保存的全部认证/配对设备记录，请确认确实需要清除。");
+        return page;
+    }
+
+    private void addAtCommandRow(LinearLayout parent, String label, String command) {
+        LinearLayout row = horizontal();
+        LinearLayout description = vertical();
+        description.addView(text(label, 13, TEXT, true));
+        TextView code = text(command, 12, TEAL, false);
+        code.setTypeface(Typeface.MONOSPACE);
+        description.addView(code);
+        row.addView(description, new LinearLayout.LayoutParams(0, -2, 1));
+        Button copy = btn("复制", false);
+        row.addView(copy, lparams(72, 43));
+        parent.addView(row, lparams(-1, -2));
+        copy.setOnClickListener(v -> copyAtCommand(command));
+        gap(parent, 5);
+    }
+
+    private void addAtDangerRow(LinearLayout parent, String label, String command, String warning) {
+        LinearLayout row = horizontal();
+        LinearLayout description = vertical();
+        description.addView(text(label, 13, TEXT, true));
+        TextView code = text(command, 12, TEAL, false);
+        code.setTypeface(Typeface.MONOSPACE);
+        description.addView(code);
+        row.addView(description, new LinearLayout.LayoutParams(0, -2, 1));
+        Button copy = btn("确认并复制", false);
+        row.addView(copy, lparams(104, 43));
+        parent.addView(row);
+        gap(parent, 4);
+        notice(parent, warning);
+        copy.setOnClickListener(v -> new AlertDialog.Builder(this)
+            .setTitle("确认操作：" + label)
+            .setMessage(warning + "\n\n仅复制指令，不会通过蓝牙自动执行。")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("确认复制", (dialog, which) -> copyAtCommand(command))
+            .show());
+    }
+
+    private void copyAtCommand(String command) {
+        try {
+            String payload = AtCommandBuilder.withCrlf(command);
+            ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (clipboard == null) { toast("无法访问剪贴板"); return; }
+            clipboard.setPrimaryClip(ClipData.newPlainText("HC-05 AT", payload));
+            toast("已复制指令（末尾含 CRLF），请通过 USB-TTL UART 发送");
+        } catch (IllegalArgumentException ex) { toast(ex.getMessage()); }
     }
 
     private View createSettingsPage() {

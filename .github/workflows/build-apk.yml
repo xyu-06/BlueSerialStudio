@@ -29,7 +29,7 @@ jobs:
           set -euo pipefail
           python3 qa/check_source.py
           mkdir -p build/protocol-tests build/mixer-tests
-          javac -d build/protocol-tests app/src/main/java/com/embedded/blueserial/SerialProtocol.java app/src/main/java/com/embedded/blueserial/DriveControlMath.java tests/ProtocolSelfTest.java
+          javac -d build/protocol-tests app/src/main/java/com/embedded/blueserial/SerialProtocol.java app/src/main/java/com/embedded/blueserial/DriveControlMath.java app/src/main/java/com/embedded/blueserial/AtCommandBuilder.java tests/ProtocolSelfTest.java
           java -cp build/protocol-tests ProtocolSelfTest
           cc -std=c99 -Wall -Wextra tests/drive_mixer_test.c -o build/mixer-tests/test
           ./build/mixer-tests/test
@@ -54,7 +54,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BlueSerialStudio-v1.5-debug-apk
+          name: BlueSerialStudio-v1.6-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
@@ -65,11 +65,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p downloads
-          cp app/build/outputs/apk/debug/app-debug.apk downloads/BlueSerialStudio-v1.5-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk downloads/BlueSerialStudio-v1.6-debug.apk
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add downloads/BlueSerialStudio-v1.5-debug.apk
+          git add downloads/BlueSerialStudio-v1.6-debug.apk
           if ! git diff --cached --quiet; then
-            git commit -m "build: publish v1.4 debug APK"
+            git commit -m "build: publish v1.6 debug APK"
             git push
           fi
