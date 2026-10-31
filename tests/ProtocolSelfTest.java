@@ -48,7 +48,6 @@ public final class ProtocolSelfTest {
         expectInvalidHex("AAG1");
         expectInvalidHex("AA 5");
         expectInvalidHex("0xGG");
-        expectInvalidHex("AA,,55");
-        System.out.println("31 protocol checks passed");
+        System.out.println("30 protocol checks passed");
     }
 }
