@@ -61,7 +61,8 @@ public final class ProtocolSelfTest {
         check(AtCommandBuilder.setRole(1).equals("AT+ROLE=1"), "HC-05 master role");
         check(AtCommandBuilder.setRole(2).equals("AT+ROLE=2"), "HC-05 loop role");
         check(AtCommandBuilder.setUart(115200, 1, 2).equals("AT+UART=115200,1,2"), "HC-05 UART command");
-        check(AtCommandBuilder.setUart(9600, 0, 0).equals("AT+UART=9600,0,0"), "HC-05 default UART command");
+        check(AtCommandBuilder.setUart(9600, 0, 0).equals("AT+UART=9600,0,0"), "HC-05 factory UART command");
+        check(AtCommandBuilder.setUart(38400, 0, 0).equals("AT+UART=38400,0,0"), "HC-05 AT+ORGL UART default");
         check(AtCommandBuilder.isSupportedBaudRate(5760), "guide baud list literal 5760");
         check(!AtCommandBuilder.isSupportedBaudRate(57600), "do not silently rewrite 5760");
         check(AtCommandBuilder.withCrlf("AT+NAME?").equals("AT+NAME?\r\n"), "HC-05 CRLF suffix");
@@ -73,6 +74,6 @@ public final class ProtocolSelfTest {
         expectInvalidAt(() -> AtCommandBuilder.setUart(9600, 2, 0));
         expectInvalidAt(() -> AtCommandBuilder.setUart(9600, 0, 3));
         expectInvalidAt(() -> AtCommandBuilder.withCrlf("AT\r"));
-        System.out.println("47 protocol and AT-command checks passed");
+        System.out.println("48 protocol and AT-command checks passed");
     }
 }

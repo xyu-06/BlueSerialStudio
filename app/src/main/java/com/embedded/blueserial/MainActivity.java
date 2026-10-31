@@ -893,7 +893,7 @@ public final class MainActivity extends Activity {
         gap(cautions, 8);
         notice(cautions, "5. 修改 AT+UART 后，USB-TTL 串口助手也要切换到新波特率，后续才能继续通信。说明书的波特率列表原文包含 5760，请先核对具体固件，不要自行当成 57600。");
         gap(cautions, 8);
-        notice(cautions, "6. AT+RESET 会让模块退出 AT 模式；AT+ORGL 恢复默认参数后也会退出 AT 模式。说明书特别注明 ORGL 后串口参数为 38400,1,0；出厂统一设置的 9600 与执行 ORGL 后的值不同。");
+        notice(cautions, "6. AT+RESET 会让模块退出 AT 模式；AT+ORGL 恢复默认参数后也会退出 AT 模式。说明书特别注明 ORGL 后串口参数为 38400,0,0；出厂统一设置的 9600 与执行 ORGL 后的值不同。");
         gap(cautions, 8);
         notice(cautions, "7. 本工具按你提供的兼容版说明书整理，只列出该说明书明确支持的命令。不同批次/固件可能有差异，先用 AT 测试并核对返回 OK；不支持的指令不要反复尝试。");
 
@@ -1040,7 +1040,7 @@ public final class MainActivity extends Activity {
 
         LinearLayout actions = card(body, "需要谨慎使用的操作");
         addAtDangerRow(actions, "恢复默认参数", "AT+ORGL",
-            "恢复默认设置会改变模块参数并退出 AT 模式。说明书列出的 ORGL 后 UART 为 38400,1,0；执行后请按新参数重新配置串口。");
+            "恢复默认设置会改变模块参数并退出 AT 模式。说明书列出的 ORGL 后 UART 为 38400,0,0；执行后请按新参数重新配置串口。");
         gap(actions, 7);
         addAtDangerRow(actions, "重启模块", "AT+RESET",
             "模块复位后会退出 AT 模式，需要重新进入 AT 模式才能继续配置。");
