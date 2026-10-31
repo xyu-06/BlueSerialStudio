@@ -16,7 +16,7 @@
 
 ## 下载 APK
 
-**[下载最新 v1.4 Debug APK](https://raw.githubusercontent.com/xyu-06/BlueSerialStudio/main/downloads/BlueSerialStudio-v1.4-debug.apk)**
+**[下载最新 v1.4 Debug APK](https://raw.githubusercontent.com/xyu-06/BlueSerialStudio/main/downloads/BlueSerialStudio-v1.5-debug.apk)**
 
 自动构建记录：[GitHub Actions](https://github.com/xyu-06/BlueSerialStudio/actions/workflows/build-apk.yml)。每次 `main` 分支更新时会编译并上传 APK 工件，还会把 APK 发布到 `downloads/` 路径，便于手机直接下载。
 
@@ -60,3 +60,9 @@ J,0,0      # 停车
 - 旧仓库中的 v1.4 已成功完成 GitHub Actions Android APK 构建。
 - 新仓库的 CI 会重新验证协议测试、源码静态检查、C 语言混控测试和 APK 编译。
 - **实体手机、SPP 硬件连接、真实电机运动、双指触控和输入法兼容性尚未实测**。第一次操作小车请先架空车轮。
+
+## v1.5.0：快捷按键支持 HEX 发送
+
+在遥控页面长按快捷按键，或新增按键时，可为**每个按键单独选择文本/HEX**。文本模式保持原有 UTF-8 文本发送和结束符设置；HEX 模式将输入解析为原始字节并直接发送，不添加 LF/CR/CRLF 结束符，也不会把十六进制字符当作普通文本发送。
+
+支持格式示例：`AA 55 01`、`AA5501`、`0xAA,0x55,0x01`。保存时会验证 HEX 格式，奇数位、非法字符和不完整字节会被拒绝。旧版本快捷键配置没有 `hex` 字段，升级后自动按文本模式读取，不会改变原有按键行为。

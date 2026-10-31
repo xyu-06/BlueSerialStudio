@@ -6,6 +6,11 @@ public final class ProtocolSelfTest {
     private static void check(boolean value, String title) {
         if (!value) throw new AssertionError(title);
     }
+    private static void expectInvalidHex(String input) {
+        try { SerialProtocol.parseHex(input); }
+        catch (IllegalArgumentException expected) { return; }
+        throw new AssertionError("Invalid HEX was accepted: " + input);
+    }
     public static void main(String[] args) {
         check(SerialProtocol.appendSuffix("LED_ON",0).equals("LED_ON"), "none");
         check(SerialProtocol.appendSuffix("LED_ON",1).equals("LED_ON\n"), "LF");
@@ -29,6 +34,21 @@ public final class ProtocolSelfTest {
         int y = DriveControlMath.buttonAxis(true,0,false,0,1100);
         check(SerialProtocol.twoAxis("J,{x},{y}",x,y).equals("J,"+x+","+y), "buttons share joystick wire format");
         check(SerialProtocol.twoAxis("J,{x},{y}",0,0).equals("J,0,0"), "urgent stop uses same protocol");
-        System.out.println("20 protocol checks passed");
+        check(java.util.Arrays.equals(SerialProtocol.parseHex("AA 55 01"),
+            new byte[]{(byte)0xAA, (byte)0x55, 0x01}), "HEX spaced bytes");
+        check(java.util.Arrays.equals(SerialProtocol.parseHex("AA5501"),
+            new byte[]{(byte)0xAA, (byte)0x55, 0x01}), "HEX continuous bytes");
+        check(java.util.Arrays.equals(SerialProtocol.parseHex("0xAA,0x55;0x01"),
+            new byte[]{(byte)0xAA, (byte)0x55, 0x01}), "HEX prefixes and separators");
+        check(java.util.Arrays.equals(SerialProtocol.parseHex("0xAABB"),
+            new byte[]{(byte)0xAA, (byte)0xBB}), "HEX continuous prefixed bytes");
+        check(SerialProtocol.parseHex("ff").length == 1, "single HEX byte");
+        expectInvalidHex("");
+        expectInvalidHex("0");
+        expectInvalidHex("AAG1");
+        expectInvalidHex("AA 5");
+        expectInvalidHex("0xGG");
+        expectInvalidHex("AA,,55");
+        System.out.println("31 protocol checks passed");
     }
 }

@@ -21,4 +21,10 @@ assert 'sendButtonMotion(false)' in s and 'DriveControlMath.buttonAxis' in s
 assert 'sendDriveState(steering, throttle, released)' in s
 assert 'sendDriveState(0, 0, true)' in s
 assert 'sendDriveCommand(' not in s and 'sendCombinedJoystick(' not in s
-print('20 UI/source static checks passed')
+assert 'boolean hexMode;' in s
+assert 'o.optBoolean("hex", false)' in s, 'old shortcut settings must default to text'
+assert 'o.put("hex", m.hexMode)' in s, 'shortcut HEX setting must persist'
+assert 'macroMode.setSelection(existing != null && existing.hexMode ? 1 : 0)' in s
+assert 'sendMacro(item)' in s and 'SerialProtocol.parseHex(macro.command)' in s
+assert 'HEX 原始字节（不添加结束符）' in s
+print('26 UI/source static checks passed')

@@ -104,7 +104,11 @@ public final class MainActivity extends Activity {
     private static final String SLIDER_STORE = "sliders_v2";
     private static final class MacroEntry {
         String label, command;
-        MacroEntry(String a, String b) { label = a; command = b; }
+        boolean hexMode;
+        MacroEntry(String a, String b) { this(a, b, false); }
+        MacroEntry(String a, String b, boolean useHex) {
+            label = a; command = b; hexMode = useHex;
+        }
     }
     private static final class SliderEntry {
         String id, label, prefix;
@@ -533,7 +537,7 @@ public final class MainActivity extends Activity {
         notice(remoteCard, "松手、离开遥控页面或切换模式，都会立即发送归零指令。单片机还必须启用通信超时停车保护。");
 
         LinearLayout macrosCard = card(body, "自定义快捷按键");
-        notice(macrosCard, "点击发送，长按编辑或删除；点“+ 添加按键”最多 64 项。");
+        notice(macrosCard, "点击发送，长按编辑或删除；每个按键可独立选择文本/HEX，最多 64 项。");
         gap(macrosCard, 8);
         macroList = vertical(); macrosCard.addView(macroList);
         Button addMacro = btn("＋ 添加按键", true);
@@ -633,7 +637,8 @@ public final class MainActivity extends Activity {
             JSONArray array = new JSONArray(macroJson);
             for (int i = 0; i < array.length(); i++) {
                 JSONObject o = array.getJSONObject(i);
-                macros.add(new MacroEntry(o.optString("label", "按键"), o.optString("command", "")));
+                macros.add(new MacroEntry(o.optString("label", "按键"),
+                    o.optString("command", ""), o.optBoolean("hex", false)));
             }
         } catch (Exception e) { toast("按键设置损坏，已恢复默认"); resetMacroDefaults(); }
 
@@ -667,7 +672,12 @@ public final class MainActivity extends Activity {
         JSONArray array = new JSONArray();
         for (MacroEntry m : macros) {
             JSONObject o = new JSONObject();
-            try { o.put("label", m.label); o.put("command", m.command); array.put(o); }
+            try {
+                o.put("label", m.label);
+                o.put("command", m.command);
+                o.put("hex", m.hexMode);
+                array.put(o);
+            }
             catch (Exception ignored) { }
         }
         preferences.edit().putString(MACRO_STORE, array.toString()).apply();
@@ -696,9 +706,10 @@ public final class MainActivity extends Activity {
             int end = Math.min(start + 2, macros.size());
             for (int index = start; index < end; index++) {
                 MacroEntry item = macros.get(index);
-                Button button = btn(item.label, "S".equals(item.command));
+                Button button = btn(item.label + (item.hexMode ? " [HEX]" : ""),
+                    !item.hexMode && "S".equals(item.command));
                 addWeighted(line, button);
-                button.setOnClickListener(v -> sendCommand(item.command));
+                button.setOnClickListener(v -> sendMacro(item));
                 button.setOnLongClickListener(v -> { editMacro(item); return true; });
             }
             if (end - start == 1) line.addView(new View(this), new LinearLayout.LayoutParams(0, dp(47), 1));
@@ -713,7 +724,17 @@ public final class MainActivity extends Activity {
         form.addView(title, lparams(-1, 48)); gap(form, 10);
         form.addView(text("串口命令", 13, MUTED, false));
         EditText cmd = input("例如 LED_ON", false); cmd.setText(existing == null ? "" : existing.command);
-        form.addView(cmd, lparams(-1, 48));
+        form.addView(cmd, lparams(-1, 48)); gap(form, 10);
+        form.addView(text("发送格式（每个按键独立设置）", 13, MUTED, false));
+        Spinner macroMode = new Spinner(this);
+        String[] macroFormats = {"文本（自动添加结束符）", "HEX 原始字节（不添加结束符）"};
+        ArrayAdapter<String> macroAdapter = new ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_item, macroFormats);
+        macroAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        macroMode.setAdapter(macroAdapter);
+        macroMode.setSelection(existing != null && existing.hexMode ? 1 : 0);
+        form.addView(macroMode, lparams(-1, 48));
+        notice(form, "HEX 示例：AA 55 01 或 AA5501。发送的是原始字节，不是字符 A A 5 5。");
         AlertDialog.Builder builder = new AlertDialog.Builder(this).setTitle(existing == null ? "添加按键" : "编辑按键")
             .setView(form).setNegativeButton("取消", null).setPositiveButton("保存", null);
         if (existing != null) builder.setNeutralButton("删除", (d, which) ->
@@ -726,8 +747,19 @@ public final class MainActivity extends Activity {
             if (label.isEmpty() || label.length() > 30 || command.trim().isEmpty() || command.length() > 200) {
                 toast("名称 1～30 字，命令 1～200 字"); return;
             }
-            if (existing == null) macros.add(new MacroEntry(label, command));
-            else { existing.label = label; existing.command = command; }
+            boolean useHex = macroMode.getSelectedItemPosition() == 1;
+            if (useHex) {
+                try { SerialProtocol.parseHex(command); }
+                catch (IllegalArgumentException error) {
+                    toast("HEX 格式错误：" + error.getMessage()); return;
+                }
+            }
+            if (existing == null) macros.add(new MacroEntry(label, command, useHex));
+            else {
+                existing.label = label;
+                existing.command = command;
+                existing.hexMode = useHex;
+            }
             saveMacros(); renderMacros(); dialog.dismiss();
         }));
         dialog.show();
@@ -879,7 +911,7 @@ public final class MainActivity extends Activity {
             @Override public void onNothingSelected(android.widget.AdapterView<?> a) { }
         });
         gap(serial, 7);
-        notice(serial, "遥杆、方向键、宏按键、滑杆和文本发送均使用此结束符。HEX 手动发送除外。");
+        notice(serial, "摇杆、方向键、文本快捷按键、滑杆和普通文本发送使用此结束符；HEX 快捷按键及手动 HEX 发送均不添加结束符。");
 
         LinearLayout remote = card(body, "统一小车遥控协议 · v1.3");
         notice(remote, "三种遥控模式统一发送一条命令；{x} 为转向（左负右正），{y} 为前后速度（后退负前进正），范围均为 -100～100。四按键根据按住时间平滑加速。");
@@ -926,14 +958,12 @@ public final class MainActivity extends Activity {
         if (content.isEmpty()) return;
         if (!client.isConnected()) { toast("请先连接蓝牙设备"); return; }
         if (!sendAsHex.isChecked()) { sendRaw(appendSuffix(unescape(content))); return; }
-        String compact = content.replaceAll("(?i)0x", "").replaceAll("\\s+", "");
-        if ((compact.length() & 1) == 1 || compact.isEmpty() || !compact.matches("[0-9a-fA-F]+")) {
-            toast("HEX 格式错误，例如 AA 55 0F"); return;
+        try {
+            byte[] bytes = SerialProtocol.parseHex(content);
+            transmit(bytes, hex(bytes));
+        } catch (IllegalArgumentException error) {
+            toast("HEX 格式错误：" + error.getMessage());
         }
-        byte[] bytes = new byte[compact.length() / 2];
-        for (int i = 0; i < bytes.length; i++)
-            bytes[i] = (byte) Integer.parseInt(compact.substring(i * 2, i * 2 + 2), 16);
-        transmit(bytes, hex(bytes));
     }
 
     private String unescape(String s) {
@@ -947,6 +977,16 @@ public final class MainActivity extends Activity {
     }
     private String joystickCommand(int x, int y) {
         return SerialProtocol.twoAxis(preferences.getString("joy_format", "J,{x},{y}"), x, y);
+    }
+    private void sendMacro(MacroEntry macro) {
+        if (!client.isConnected()) { toast("请先连接蓝牙设备"); return; }
+        if (!macro.hexMode) { sendCommand(macro.command); return; }
+        try {
+            byte[] bytes = SerialProtocol.parseHex(macro.command);
+            transmit(bytes, hex(bytes));
+        } catch (IllegalArgumentException error) {
+            toast("HEX 格式错误：" + error.getMessage());
+        }
     }
     private void sendCommand(String command) {
         if (!client.isConnected()) return; // Avoid flooding error dialogs during a joystick drag.
