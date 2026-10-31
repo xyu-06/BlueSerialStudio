@@ -24,12 +24,12 @@ public final class SerialProtocol {
         if (input == null || input.trim().isEmpty())
             throw new IllegalArgumentException("不能为空");
         String text = input.trim();
-        String tokenPattern = "(?i)(?:0x)?[0-9a-f]{2}(?:[\\\\s,;:-]+(?:0x)?[0-9a-f]{2})*";
+        String tokenPattern = "(?i)(?:0x)?[0-9a-f]{2}(?:[\\s,;:-]+(?:0x)?[0-9a-f]{2})*";
         String compactPattern = "(?i)(?:0x)?(?:[0-9a-f]{2})+";
         String digits;
         if (text.matches(tokenPattern)) {
             StringBuilder combined = new StringBuilder();
-            for (String token : text.split("[\\\\s,;:-]+"))
+            for (String token : text.split("[\\s,;:-]+"))
                 combined.append(token.replaceFirst("(?i)^0x", ""));
             digits = combined.toString();
         } else if (text.matches(compactPattern)) {
