@@ -325,8 +325,8 @@ public final class MainActivity extends Activity {
         pages[0] = createTerminalPage();
         pages[1] = createControlPage();
         pages[2] = createPlotPage();
-        pages[3] = createSettingsPage();
-        pages[4] = createAtToolPage();
+        pages[3] = createAtToolPage();
+        pages[4] = createSettingsPage();
 
         LinearLayout nav = horizontal();
         nav.setPadding(dp(10), dp(7), dp(10), dp(7));
