@@ -24,26 +24,41 @@ public final class SerialProtocol {
         if (input == null || input.trim().isEmpty())
             throw new IllegalArgumentException("不能为空");
         String text = input.trim();
-        String tokenPattern = "(?i)(?:0x)?[0-9a-f]{2}(?:[\\s,;:-]+(?:0x)?[0-9a-f]{2})*";
-        String compactPattern = "(?i)(?:0x)?(?:[0-9a-f]{2})+";
-        String digits;
-        if (text.matches(tokenPattern)) {
-            StringBuilder combined = new StringBuilder();
-            for (String token : text.split("[\\s,;:-]+"))
-                combined.append(token.replaceFirst("(?i)^0x", ""));
-            digits = combined.toString();
-        } else if (text.matches(compactPattern)) {
-            digits = text.replaceFirst("(?i)^0x", "");
-        } else {
-            throw new IllegalArgumentException("请输入完整的十六进制字节，例如 AA 55 01");
+        boolean separated = false;
+        for (int i = 0; i < text.length(); i++) separated |= isSeparator(text.charAt(i));
+        java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+        int start = 0;
+        while (start < text.length()) {
+            int end = start;
+            while (end < text.length() && !isSeparator(text.charAt(end))) end++;
+            int digits = start;
+            if (end - digits >= 2 && text.charAt(digits) == '0'
+                    && (text.charAt(digits + 1) == 'x' || text.charAt(digits + 1) == 'X')) digits += 2;
+            int length = end - digits;
+            if (length == 0 || (length & 1) != 0 || (separated && length != 2)) throw invalidHex();
+            for (int i = digits; i < end; i += 2) {
+                int hi = hexDigit(text.charAt(i)), lo = hexDigit(text.charAt(i + 1));
+                if (hi < 0 || lo < 0) throw invalidHex();
+                output.write((hi << 4) | lo);
+            }
+            if (end == text.length()) break;
+            while (end < text.length() && isSeparator(text.charAt(end))) end++;
+            if (end == text.length()) throw invalidHex();
+            start = end;
         }
-        if ((digits.length() & 1) != 0)
-            throw new IllegalArgumentException("每个字节必须由两位十六进制数字组成");
-        byte[] bytes = new byte[digits.length() / 2];
-        for (int i = 0; i < bytes.length; i++)
-            bytes[i] = (byte) Integer.parseInt(digits.substring(i * 2, i * 2 + 2), 16);
-        return bytes;
+        return output.toByteArray();
     }
-
-
+    private static boolean isSeparator(char c) {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == 11
+            || c == ',' || c == ';' || c == ':' || c == '-';
+    }
+    private static int hexDigit(char c) {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    }
+    private static IllegalArgumentException invalidHex() {
+        return new IllegalArgumentException("请输入完整的十六进制字节，例如 AA 55 01");
+    }
 }
