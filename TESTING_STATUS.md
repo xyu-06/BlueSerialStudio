@@ -42,3 +42,5 @@
 5. 三种遥控模式松手与急停后重新操作；先架空轮子测试，STM32 保持通信超时停车。
 
 完整 Android APK 构建及所有回归测试已于 2026-11-01（北京时间）通过：[GitHub Actions run 41224996225](https://github.com/xyu-06/BlueSerialStudio/actions/runs/41224996225)，对应代码提交 `346e75c053df7e960be4f4d362ad9e84902cf0c2`。这不包含真机验收。
+
+发布前补充：已复现 8190 字符带空格 HEX 导致旧正则解析器 StackOverflowError；现改为线性逐字节解析，新增长连续/分隔/0x 数据、尾部分隔符和非法末尾字节测试。

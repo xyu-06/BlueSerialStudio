@@ -74,6 +74,13 @@ public final class ProtocolSelfTest {
         expectInvalidAt(() -> AtCommandBuilder.setUart(9600, 2, 0));
         expectInvalidAt(() -> AtCommandBuilder.setUart(9600, 0, 3));
         expectInvalidAt(() -> AtCommandBuilder.withCrlf("AT\r"));
-        System.out.println("48 protocol and AT-command checks passed");
+        check(SerialProtocol.parseHex("AA ".repeat(2730)).length == 2730, "long spaced HEX cannot overflow stack");
+        check(SerialProtocol.parseHex("AA".repeat(4096)).length == 4096, "long compact HEX");
+        check(SerialProtocol.parseHex("0xAA,".repeat(1600) + "0x55").length == 1601, "long prefixed HEX");
+        expectInvalidHex("AA,");
+        expectInvalidHex(",AA");
+        expectInvalidHex("AABB CC");
+        expectInvalidHex("AA ".repeat(2000) + "GG");
+        System.out.println("55 protocol and AT-command checks passed");
     }
 }
