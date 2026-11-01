@@ -74,7 +74,7 @@ public final class MainActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private SharedPreferences preferences;
     private final StreamDecoder decoder = new StreamDecoder();
-    private final StringBuilder lineBuffer = new StringBuilder();
+    private final LineFramer lineFramer = new LineFramer(4096);
     private final StringBuilder logText = new StringBuilder();
 
     private LinearLayout root, header;
@@ -93,6 +93,7 @@ public final class MainActivity extends Activity {
     private JoystickView singleJoystick;
     private LinearLayout singleModePanel, dualModePanel, buttonModePanel;
     private int throttle = 0, steering = 0;
+    private boolean stoppingMotion;
     private final boolean[] directionHeld = new boolean[4]; // 前、后、左、右
     private final long[] directionPressedAt = new long[4];
     private final Runnable buttonHeartbeat = new Runnable() {
@@ -122,7 +123,37 @@ public final class MainActivity extends Activity {
     private OscilloscopeView chart;
 
     private boolean chartPaused = false, demoMode = false;
-    private int demoTick = 0, receivedCount = 0, transmittedCount = 0;
+    private int demoTick = 0;
+    private long receivedCount = 0, transmittedCount = 0;
+    private boolean logPaused, logRefreshPending;
+    private Button repeatButton;
+    private byte[] repeatPayload;
+    private String repeatDisplay;
+    private int repeatInterval;
+    private boolean reconnectRequested;
+    private String pendingDeviceAddress, pendingDeviceName;
+    private final List<HistoryEntry> sendHistory = new ArrayList<>();
+    private static final class HistoryEntry {
+        final String text;
+        final boolean hex;
+        final int suffix;
+        HistoryEntry(String text, boolean hex, int suffix) {
+            this.text = text; this.hex = hex; this.suffix = suffix;
+        }
+    }
+    private final Runnable logRefresh = () -> {
+        logRefreshPending = false;
+        renderLog();
+    };
+    private final Runnable repeatSender = new Runnable() {
+        @Override public void run() {
+            if (repeatPayload == null) return;
+            if (!client.isConnected() || selectedTab != 0) { stopRepeatSend(); return; }
+            if (!client.sendRepeated(repeatPayload)) { stopRepeatSend(); return; }
+            addLog("TX↻", repeatDisplay);
+            handler.postDelayed(this, repeatInterval);
+        }
+    };
     private int selectedTab = 0;
     private String currentDevice = "未连接";
 
@@ -171,13 +202,19 @@ public final class MainActivity extends Activity {
         BluetoothManager manager = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
         bluetoothAdapter = manager == null ? null : manager.getAdapter();
         loadControls();
+        loadSendHistory();
         client = new BluetoothSppClient(new BluetoothSppClient.Listener() {
             @Override public void onStatus(String status, boolean connected) {
                 connectionState.setText(status);
                 currentDevice = status;
-                connectButtonText.setText(connected ? "断开" : "连接设备");
+                connectButtonText.setText(connected ? "断开" : client.isConnecting() ? "取消连接" : "连接设备");
                 connectionState.setTextColor(connected ? 0xff70e4cd : 0xffbbcad5);
-                if (!connected) { decoder.reset(); stopAllMotion(); }
+                if (!connected) {
+                    decoder.reset(); lineFramer.reset(); stopRepeatSend(); stopAllMotion();
+                } else if (pendingDeviceAddress != null) {
+                    preferences.edit().putString("last_device_address", pendingDeviceAddress)
+                        .putString("last_device_name", pendingDeviceName).apply();
+                }
             }
             @Override public void onReceived(byte[] bytes) { onReceiveBytes(bytes); }
             @Override public void onSent(int count) {
@@ -308,7 +345,7 @@ public final class MainActivity extends Activity {
         Button choose = btn("连接设备", true);
         connectButtonText = choose;
         stateRow.addView(choose, lparams(118, 43));
-        choose.setOnClickListener(v -> { if (client.isConnected()) client.disconnect(); else chooseDevice(); });
+        choose.setOnClickListener(v -> { if (client.isConnected() || client.isConnecting()) client.disconnect(); else chooseDevice(); });
         header.addView(stateRow);
         gap(header, 13);
         LinearLayout counterRow = horizontal();
@@ -348,6 +385,7 @@ public final class MainActivity extends Activity {
 
     private void openTab(int tab) {
         if (selectedTab == 1 && tab != 1) stopAllMotion();
+        if (tab != 0) stopRepeatSend();
         selectedTab = tab;
         pageHost.removeAllViews();
         View page = pages[tab];
@@ -372,6 +410,7 @@ public final class MainActivity extends Activity {
         toggles.addView(showRxHex, new LinearLayout.LayoutParams(0, -2, 1));
         toggles.addView(autoScroll, new LinearLayout.LayoutParams(0, -2, 1));
         receive.addView(toggles);
+        notice(receive, "暂停仅停止显示刷新，接收与计数继续；日志保留最近约 28000 字符。TX 表示已入队，字节计数为实际写入量。");
         gap(receive, 7);
         logScroller = new ScrollView(this);
         logScroller.setFillViewport(true);
@@ -385,8 +424,13 @@ public final class MainActivity extends Activity {
         receive.addView(logScroller, lparams(-1, 220));
         gap(receive, 12);
         LinearLayout actions = horizontal();
-        Button clear = btn("清空 TX/RX", false), export = btn("导出 TXT", false);
-        addWeighted(actions, clear); addWeighted(actions, export);
+        Button clear = btn("清空 TX/RX", false), export = btn("导出 TXT", false), pauseLog = btn("暂停显示", false);
+        addWeighted(actions, clear); addWeighted(actions, export); addWeighted(actions, pauseLog);
+        pauseLog.setOnClickListener(v -> {
+            logPaused = !logPaused;
+            pauseLog.setText(logPaused ? "继续显示" : "暂停显示");
+            if (!logPaused) renderLog();
+        });
         receive.addView(actions);
         clear.setOnClickListener(v -> clearMonitoring());
         export.setOnClickListener(v -> exportLog());
@@ -412,6 +456,15 @@ public final class MainActivity extends Activity {
         send.addView(row);
         sendAsHex.setOnCheckedChangeListener((v, checked) -> refreshSendSuffix());
         sendButton.setOnClickListener(v -> manualSend());
+        LinearLayout tools = horizontal();
+        Button history = btn("发送历史", false);
+        repeatButton = btn("循环发送", false);
+        addWeighted(tools, history); addWeighted(tools, repeatButton);
+        send.addView(tools);
+        history.setOnClickListener(v -> showSendHistory());
+        repeatButton.setOnClickListener(v -> {
+            if (repeatPayload != null) stopRepeatSend(); else configureRepeatSend();
+        });
         page.addView(dock, lparams(-1, -2));
         refreshSendSuffix();
         return page;
@@ -610,13 +663,14 @@ public final class MainActivity extends Activity {
 
     /** One wire protocol for all three control modes. Released axes use urgent sends. */
     private void sendDriveState(int x, int y, boolean urgent) {
+        if (stoppingMotion) return;
         if (joyReadout != null) joyReadout.setText("前后速度 Y: " + y + "     转向 X: " + x);
         String command = joystickCommand(x, y);
         if (urgent) sendUrgentCommand(command);
         else if (client.isConnected()) {
             String value = appendSuffix(unescape(command));
-            client.sendDrive(value.getBytes(StandardCharsets.UTF_8));
-            addLog("TX", value.replace("\r", "\\r").replace("\n", "\\n"));
+            if (client.sendDrive(value.getBytes(StandardCharsets.UTF_8)))
+                addLog("TX", value.replace("\r", "\\r").replace("\n", "\\n"));
         }
     }
 
@@ -624,6 +678,8 @@ public final class MainActivity extends Activity {
         transmittedCount = 0;
         receivedCount = 0;
         logText.setLength(0);
+        handler.removeCallbacks(logRefresh);
+        logRefreshPending = false;
         if (outputLog != null) outputLog.setText("等待串口数据…\n");
         if (logScroller != null) logScroller.scrollTo(0, 0);
         updateCounters();
@@ -865,7 +921,7 @@ public final class MainActivity extends Activity {
             if (demoMode) handler.post(demoRunner);
         });
         LinearLayout help = card(body, "单片机数据格式");
-        notice(help, "每行代表一个采样帧，必须以换行符结束。支持纯数字 CSV 或 key=value 格式。绘图与终端接收同时进行。");
+        notice(help, "每行代表一个采样帧，支持 LF、CR、CRLF 结束符。支持纯数字 CSV 或 key=value 格式。绘图与终端接收同时进行。");
         gap(help, 10);
         TextView example = text("23.5\\n\n23.5,56.1\\n\nax=0.5,ay=-1.2,az=9.8\\n", 13, NAVY, false);
         example.setTypeface(Typeface.MONOSPACE);
@@ -1107,6 +1163,11 @@ public final class MainActivity extends Activity {
         LinearLayout connect = card(body, "连接设置");
         notice(connect, "默认 SPP 服务 UUID 适用于常见 HC-05 / HC-06 类模块。只有模块使用其他 UUID 时才需要修改。");
         gap(connect, 12);
+        Button reconnect = btn("重连上次设备", false);
+        connect.addView(reconnect, lparams(-1, 47));
+        reconnect.setOnClickListener(v -> reconnectLastDevice());
+        notice(connect, "仅记住成功连接的设备；重连由您手动触发，不会恢复之前的循环发送或运动指令。");
+        gap(connect, 10);
         uuidEdit = input("SPP UUID", false);
         uuidEdit.setText(preferences.getString("spp_uuid", DEFAULT_UUID));
         connect.addView(uuidEdit, lparams(-1, 49));
@@ -1168,7 +1229,7 @@ public final class MainActivity extends Activity {
             toast("已恢复统一协议");
         });
         LinearLayout about = card(body, "说明与兼容性");
-        notice(about, "• 支持 Android 8.0+ 蓝牙经典 SPP。\n• 支持已配对设备列表及附近设备发现。\n• 不支持 BLE-only 的蓝牙 GATT 模块。\n• 波特率由蓝牙模块 UART 侧与 MCU 匹配，手机端无需设置。\n• 数据只保存在本机内存或您主动导出的 TXT 文件，不上传服务器。\n• 控制电机时务必实现通信超时急停和硬件电源开关。");
+        notice(about, "• 支持 Android 8.0+ 蓝牙经典 SPP。\n• 支持已配对设备列表及附近设备发现。\n• 不支持 BLE-only 的蓝牙 GATT 模块。\n• 波特率由蓝牙模块 UART 侧与 MCU 匹配，手机端无需设置。\n• 设置、最近设备和最近 20 条发送历史保存在本机；历史可清空。日志仅保留最近约 28000 字符，可导出 TXT，不上传服务器。\n• 控制电机时务必实现通信超时急停和硬件电源开关。");
         gap(about, 13);
         Button reset = btn("恢复默认快捷按键", false);
         about.addView(reset, lparams(-1, 46));
@@ -1180,17 +1241,108 @@ public final class MainActivity extends Activity {
         return page;
     }
 
-    private void manualSend() {
+    private byte[] terminalPayload() {
         String content = sendInput.getText().toString();
-        if (content.isEmpty()) return;
+        if (content.isEmpty()) throw new IllegalArgumentException("请输入发送内容");
+        if (content.length() > 8192) throw new IllegalArgumentException("单次输入不能超过 8192 字符");
+        return sendAsHex.isChecked() ? SerialProtocol.parseHex(content)
+            : appendSuffix(unescape(content)).getBytes(StandardCharsets.UTF_8);
+    }
+    private String terminalDisplay(byte[] bytes) {
+        return sendAsHex.isChecked() ? hex(bytes)
+            : new String(bytes, StandardCharsets.UTF_8).replace("\r", "\\r").replace("\n", "\\n");
+    }
+    private void manualSend() {
         if (!client.isConnected()) { toast("请先连接蓝牙设备"); return; }
-        if (!sendAsHex.isChecked()) { sendRaw(appendSuffix(unescape(content))); return; }
+        stopRepeatSend();
         try {
-            byte[] bytes = SerialProtocol.parseHex(content);
-            transmit(bytes, hex(bytes));
-        } catch (IllegalArgumentException error) {
-            toast("HEX 格式错误：" + error.getMessage());
+            byte[] bytes = terminalPayload();
+            if (transmit(bytes, terminalDisplay(bytes))) rememberSend();
+        } catch (IllegalArgumentException error) { toast(error.getMessage()); }
+    }
+    private void configureRepeatSend() {
+        if (!client.isConnected()) { toast("请先连接蓝牙设备"); return; }
+        try { terminalPayload(); }
+        catch (IllegalArgumentException error) { toast(error.getMessage()); return; }
+        EditText interval = input("间隔毫秒，100～60000", false);
+        interval.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        interval.setText(Integer.toString(preferences.getInt("repeat_interval", 1000)));
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("循环发送当前指令")
+            .setMessage("间隔 100～60000 ms。启动时固定内容、HEX 模式和结束符；修改输入不会改变正在发送的指令。离开串口页、切到后台或断线会停止。")
+            .setView(interval).setPositiveButton("开始", null).setNegativeButton("取消", null).create();
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            try {
+                int value = Integer.parseInt(interval.getText().toString());
+                if (value < 100 || value > 60000) throw new IllegalArgumentException("间隔应为 100～60000 ms");
+                if (!client.isConnected()) { toast("蓝牙未连接"); return; }
+                byte[] payload = terminalPayload();
+                stopRepeatSend();
+                repeatInterval = value;
+                repeatPayload = payload;
+                repeatDisplay = terminalDisplay(payload);
+                preferences.edit().putInt("repeat_interval", value).apply();
+                rememberSend();
+                repeatButton.setText("停止循环 · " + value + " ms");
+                handler.post(repeatSender);
+                dialog.dismiss();
+            } catch (IllegalArgumentException error) { toast("请检查内容和间隔：" + error.getMessage()); }
+        }));
+        dialog.show();
+    }
+    private void stopRepeatSend() {
+        repeatPayload = null;
+        handler.removeCallbacks(repeatSender);
+        if (client != null) client.cancelRepeated();
+        if (repeatButton != null) repeatButton.setText("循环发送");
+    }
+    private void loadSendHistory() {
+        try {
+            JSONArray array = new JSONArray(preferences.getString("send_history", "[]"));
+            for (int i = 0; i < Math.min(20, array.length()); i++) {
+                JSONObject item = array.getJSONObject(i);
+                String text = item.getString("text");
+                if (!text.isEmpty() && text.length() <= 8192)
+                    sendHistory.add(new HistoryEntry(text, item.optBoolean("hex", false),
+                        Math.max(0, Math.min(3, item.optInt("suffix", 1)))));
+            }
+        } catch (org.json.JSONException ignored) { sendHistory.clear(); }
+    }
+    private void rememberSend() {
+        HistoryEntry entry = new HistoryEntry(sendInput.getText().toString(), sendAsHex.isChecked(),
+            preferences.getInt("suffix", 1));
+        sendHistory.removeIf(old -> old.text.equals(entry.text) && old.hex == entry.hex && old.suffix == entry.suffix);
+        sendHistory.add(0, entry);
+        while (sendHistory.size() > 20) sendHistory.remove(sendHistory.size() - 1);
+        JSONArray array = new JSONArray();
+        try {
+            for (HistoryEntry item : sendHistory) {
+                JSONObject object = new JSONObject();
+                object.put("text", item.text); object.put("hex", item.hex); object.put("suffix", item.suffix);
+                array.put(object);
+            }
+            preferences.edit().putString("send_history", array.toString()).apply();
+        } catch (org.json.JSONException ignored) { }
+    }
+    private void showSendHistory() {
+        if (sendHistory.isEmpty()) { toast("还没有发送历史"); return; }
+        String[] labels = new String[sendHistory.size()];
+        for (int i = 0; i < labels.length; i++) {
+            HistoryEntry entry = sendHistory.get(i);
+            String preview = entry.text.replace('\n', ' ').replace('\r', ' ');
+            labels[i] = (entry.hex ? "HEX · " : "文本 · ") + preview.substring(0, Math.min(80, preview.length()));
         }
+        new AlertDialog.Builder(this).setTitle("最近 20 条 · 点击填入，不自动发送")
+            .setItems(labels, (d, which) -> {
+                stopRepeatSend();
+                HistoryEntry entry = sendHistory.get(which);
+                sendInput.setText(entry.text); sendAsHex.setChecked(entry.hex);
+                preferences.edit().putInt("suffix", entry.suffix).apply();
+                endSelection.setSelection(entry.suffix);
+                refreshSendSuffix();
+                toast("已填入内容并恢复结束符，请检查后发送");
+            }).setNeutralButton("清空历史", (d, w) -> {
+                sendHistory.clear(); preferences.edit().remove("send_history").apply();
+            }).setNegativeButton("关闭", null).show();
     }
 
     private String unescape(String s) {
@@ -1223,32 +1375,24 @@ public final class MainActivity extends Activity {
         if (!client.isConnected()) return;
         String value = appendSuffix(unescape(command));
         byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-        client.sendUrgent(bytes);
-        addLog("TX!", value.replace("\r", "\\r").replace("\n", "\\n"));
+        if (client.sendUrgent(bytes))
+            addLog("TX!", value.replace("\r", "\\r").replace("\n", "\\n"));
     }
     private void sendRaw(String content) {
         transmit(content.getBytes(StandardCharsets.UTF_8), content.replace("\r", "\\r").replace("\n", "\\n"));
     }
-    private void transmit(byte[] payload, String display) {
-        if (!client.isConnected()) { toast("蓝牙未连接"); return; }
-        client.send(payload);
+    private boolean transmit(byte[] payload, String display) {
+        if (!client.isConnected()) { toast("蓝牙未连接"); return false; }
+        if (!client.send(payload)) return false;
         addLog("TX", display);
+        return true;
     }
     private void onReceiveBytes(byte[] bytes) {
         receivedCount += bytes.length;
         updateCounters();
         String plain = decoder.decode(bytes);
         addLog("RX", showRxHex.isChecked() ? hex(bytes) : plain.replace("\r", "\\r").replace("\n", "\\n"));
-        for (int i = 0; i < plain.length(); i++) {
-            char c = plain.charAt(i);
-            if (c == '\n') {
-                parsePlotLine(lineBuffer.toString().trim());
-                lineBuffer.setLength(0);
-            } else if (c != '\r') {
-                lineBuffer.append(c);
-                if (lineBuffer.length() > 4096) lineBuffer.delete(0, lineBuffer.length() - 2048);
-            }
-        }
+        lineFramer.accept(plain, this::parsePlotLine);
     }
     private void parsePlotLine(String line) {
         if (chartPaused || line.isEmpty()) return;
@@ -1283,11 +1427,16 @@ public final class MainActivity extends Activity {
         String stamp = new SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(new Date());
         logText.append('[').append(stamp).append("] ").append(category).append("  ").append(content).append('\n');
         if (logText.length() > MAX_LOG) logText.delete(0, logText.length() - 20000);
-        if (outputLog != null) {
-            outputLog.setText(logText);
-            if (autoScroll != null && autoScroll.isChecked())
-                logScroller.post(() -> logScroller.fullScroll(View.FOCUS_DOWN));
+        if (!logPaused && !logRefreshPending) {
+            logRefreshPending = true;
+            handler.postDelayed(logRefresh, 100);
         }
+    }
+    private void renderLog() {
+        if (logPaused || outputLog == null) return;
+        outputLog.setText(logText.length() == 0 ? "等待串口数据…\n" : logText.toString());
+        if (autoScroll != null && autoScroll.isChecked())
+            logScroller.post(() -> logScroller.fullScroll(View.FOCUS_DOWN));
     }
     private void toast(String s) { Toast.makeText(this, s, Toast.LENGTH_SHORT).show(); }
 
@@ -1307,7 +1456,35 @@ public final class MainActivity extends Activity {
         if (!bluetoothAdapter.isEnabled()) {
             startActivityForResult(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE), REQ_ENABLE); return;
         }
-        showDeviceDialog();
+        if (reconnectRequested) { reconnectRequested = false; connectLastDevice(); }
+        else showDeviceDialog();
+    }
+
+    private void reconnectLastDevice() {
+        if (client.isConnected() || client.isConnecting()) { toast("请先断开或取消当前连接"); return; }
+        if (preferences.getString("last_device_address", "").isEmpty()) {
+            toast("还没有成功连接记录，请先选择设备"); return;
+        }
+        reconnectRequested = true;
+        chooseDevice();
+    }
+    @SuppressLint("MissingPermission")
+    private void connectLastDevice() {
+        try {
+            BluetoothDevice device = bluetoothAdapter.getRemoteDevice(preferences.getString("last_device_address", ""));
+            if (device.getBondState() != BluetoothDevice.BOND_BONDED) {
+                toast("上次设备已取消配对，请重新配对"); showDeviceDialog(); return;
+            }
+            connectDevice(device);
+        } catch (IllegalArgumentException | SecurityException error) { toast("无法重连，请重新选择设备"); }
+    }
+    @SuppressLint("MissingPermission")
+    private void connectDevice(BluetoothDevice device) {
+        stopRepeatSend();
+        decoder.reset(); lineFramer.reset();
+        pendingDeviceAddress = device.getAddress();
+        pendingDeviceName = device.getName();
+        client.connect(bluetoothAdapter, device, preferences.getString("spp_uuid", DEFAULT_UUID));
     }
 
     @SuppressLint("MissingPermission")
@@ -1329,13 +1506,17 @@ public final class MainActivity extends Activity {
                     } catch (SecurityException ex) { toast("缺少蓝牙配对权限"); }
                     return;
                 }
-                decoder.reset(); lineBuffer.setLength(0);
-                client.connect(bluetoothAdapter, device, preferences.getString("spp_uuid", DEFAULT_UUID));
+                connectDevice(device);
             })
             .setPositiveButton("扫描附近", null)
             .setNegativeButton("关闭", null)
+            .setNeutralButton("重连上次", (d, w) -> reconnectLastDevice())
             .create();
-        deviceDialog.setOnDismissListener(d -> deviceDialog = null);
+        deviceDialog.setOnDismissListener(d -> {
+            deviceDialog = null;
+            scanning = false;
+            try { bluetoothAdapter.cancelDiscovery(); } catch (SecurityException ignored) { }
+        });
         deviceDialog.show();
         deviceDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> startDiscovery());
         updateDeviceList();
@@ -1371,9 +1552,9 @@ public final class MainActivity extends Activity {
         super.onRequestPermissionsResult(requestCode, permissions, results);
         if (requestCode != REQ_PERMISSION) return;
         if (hasPermissions()) chooseDevice();
-        else new AlertDialog.Builder(this).setTitle("需要蓝牙权限")
+        else { reconnectRequested = false; new AlertDialog.Builder(this).setTitle("需要蓝牙权限")
             .setMessage("Android 12 及以上需允许“附近的设备”，才能连接 SPP 蓝牙模块。旧版 Android 扫描附近设备需要位置权限。")
-            .setPositiveButton("知道了", null).show();
+            .setPositiveButton("知道了", null).show(); }
     }
     private void exportLog() {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
@@ -1384,7 +1565,9 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQ_ENABLE && resultCode == RESULT_OK) chooseDevice();
+        if (requestCode == REQ_ENABLE) {
+            if (resultCode == RESULT_OK) chooseDevice(); else reconnectRequested = false;
+        }
         if (requestCode == REQ_EXPORT && resultCode == RESULT_OK && data != null && data.getData() != null) {
             try (OutputStream out = getContentResolver().openOutputStream(data.getData())) {
                 if (out == null) throw new java.io.IOException("无法写入文件");
@@ -1394,6 +1577,8 @@ public final class MainActivity extends Activity {
         }
     }
     private void stopAllMotion() {
+        boolean shouldSend = selectedTab == 1 || throttle != 0 || steering != 0 || anyDirectionHeld();
+        stoppingMotion = true;
         handler.removeCallbacks(buttonHeartbeat);
         for (int i = 0; i < directionHeld.length; i++) directionHeld[i] = false;
         if (singleJoystick != null) singleJoystick.releaseControl();
@@ -1401,16 +1586,18 @@ public final class MainActivity extends Activity {
         if (steeringJoystick != null) steeringJoystick.releaseControl();
         throttle = 0;
         steering = 0;
-        sendDriveState(0, 0, true);
+        stoppingMotion = false;
+        if (shouldSend) sendDriveState(0, 0, true);
     }
     @Override protected void onPause() {
+        stopRepeatSend();
         stopAllMotion();
         super.onPause();
     }
     @Override protected void onDestroy() {
         stopAllMotion();
         demoMode = false;
-        handler.removeCallbacks(demoRunner);
+        handler.removeCallbacksAndMessages(null);
         if (bluetoothAdapter != null && hasPermissions()) {
             try { bluetoothAdapter.cancelDiscovery(); } catch (SecurityException ignored) { }
         }

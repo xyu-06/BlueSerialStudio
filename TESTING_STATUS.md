@@ -1,4 +1,4 @@
-# 测试与验证状态（v1.6）
+# 测试与验证状态（v1.7.0）
 
 - GitHub Actions：运行 Python 源码回归检查、Java 串口协议测试、C 语言轮速混控测试，然后执行 Android Gradle Debug APK 构建。
 - 迁移来源：原 `xyu-06/javaProject` 的 `blue-serial-studio` 分支，最新已成功编译版本 v1.4.0。
@@ -25,3 +25,20 @@
 - 修正 HC-05 AT 和设置页面反转。
 - 对全部五个标签页面添加静态绑定检查。
 - 仍需手机真机验证。
+
+## v1.7.0：调试工作流与可靠性
+
+本轮本地验证：
+- `bash qa/run_tests.sh`：原有协议/AT、UI 静态和 C 混控测试；新增发送队列容量、急停后恢复、重连清队列、循环取消、CR/LF/CRLF、超长帧和 UTF-8 分包测试。
+- `BluetoothClientSelfTest`：运行实际 BluetoothSppClient，使用测试目录内的 Handler/Socket 替身检查旧会话回调、跨会话隔离、急停后恢复、连接超时和认证连接失败回退。
+- 测试替身不会编入 Android APK；正式 app 仅编译 app/src/main。
+- Android 构建结果以对应提交的 GitHub Actions 为准；本机没有 Android SDK。
+
+仍需真机验证：
+1. HC-05 连接、取消连接、关闭模块、重新连接；快速反复切换连接。
+2. 文本和 HEX 循环发送，停止后 UART 不再出现排队中的旧循环命令；切页面/后台/断线停止且不自动恢复。
+3. 发送历史恢复内容、模式及结束符；原有快捷键、滑杆和 HC-05 AT 页功能。
+4. 小屏幕与键盘展开时可访问发送、历史、停止循环；暂停日志不影响 RX 计数及曲线。
+5. 三种遥控模式松手与急停后重新操作；先架空轮子测试，STM32 保持通信超时停车。
+
+完整 Android APK 构建及所有回归测试已于 2026-11-01（北京时间）通过：[GitHub Actions run 41224996225](https://github.com/xyu-06/BlueSerialStudio/actions/runs/41224996225)，对应代码提交 `346e75c053df7e960be4f4d362ad9e84902cf0c2`。这不包含真机验收。
