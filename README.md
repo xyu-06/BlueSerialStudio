@@ -16,7 +16,7 @@
 
 ## 下载 APK
 
-**[下载最新 v1.6.1 Debug APK](https://raw.githubusercontent.com/xyu-06/BlueSerialStudio/main/downloads/BlueSerialStudio-v1.6.1-debug.apk)**
+**[下载最新 v1.7.0 Debug APK](https://raw.githubusercontent.com/xyu-06/BlueSerialStudio/main/downloads/BlueSerialStudio-v1.7.0-debug.apk)**
 
 自动构建记录：[GitHub Actions](https://github.com/xyu-06/BlueSerialStudio/actions/workflows/build-apk.yml)。每次 `main` 分支更新时会编译并上传 APK 工件，还会把 APK 发布到 `downloads/` 路径，便于手机直接下载。
 

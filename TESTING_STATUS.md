@@ -1,4 +1,4 @@
-# 测试与验证状态（v1.6）
+# 测试与验证状态（v1.7.0）
 
 - GitHub Actions：运行 Python 源码回归检查、Java 串口协议测试、C 语言轮速混控测试，然后执行 Android Gradle Debug APK 构建。
 - 迁移来源：原 `xyu-06/javaProject` 的 `blue-serial-studio` 分支，最新已成功编译版本 v1.4.0。
@@ -40,3 +40,5 @@
 3. 发送历史恢复内容、模式及结束符；原有快捷键、滑杆和 HC-05 AT 页功能。
 4. 小屏幕与键盘展开时可访问发送、历史、停止循环；暂停日志不影响 RX 计数及曲线。
 5. 三种遥控模式松手与急停后重新操作；先架空轮子测试，STM32 保持通信超时停车。
+
+完整 Android APK 构建及所有回归测试已于 2026-11-01（北京时间）通过：[GitHub Actions run 41224996225](https://github.com/xyu-06/BlueSerialStudio/actions/runs/41224996225)，对应代码提交 `346e75c053df7e960be4f4d362ad9e84902cf0c2`。这不包含真机验收。

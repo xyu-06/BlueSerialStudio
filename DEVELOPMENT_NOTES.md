@@ -1,5 +1,7 @@
 # 后续接续工作
 
+PR：https://github.com/xyu-06/BlueSerialStudio/pull/1 。完整 Android 编译和回归在 run 41224996225 通过，真机验证待完成。
+
 本轮基于 main 2f72a74670985136deed04e953031aa372d3fd6a，分支 codex/serial-workflow-reliability。
 
 已实现 v1.7.0：发送历史、循环发送、手动重连上次设备、可取消/限时连接、日志暂停/批量刷新、CR/LF 分帧、队列和连接隔离修复。保持 J,{x},{y}、快捷键独立文本/HEX、HC-05 AT 仅复制、不使用网络权限/第三方运行时库。
